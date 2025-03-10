@@ -20,7 +20,7 @@ load_dotenv(env_path)
 API_ID = int(os.getenv('TG_API_ID', '0'))
 API_HASH = os.getenv('TG_API_HASH', '')
 PHONE = os.getenv('TG_PHONE', '')
-SESSION_NAME = 'list_dialogs'
+SESSION_NAME = os.getenv('TG_SESSION', 'real_estate_monitor')
 
 async def login(client):
     """Handle the login process"""
