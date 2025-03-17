@@ -18,7 +18,7 @@ import pickle
 import signal
 import psutil
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Union, Any
 
 from telethon import TelegramClient, events, utils
@@ -107,9 +107,11 @@ class State:
     
     def save(self):
         """Save state to file"""
+        # Convert to UTC before saving
+        last_run_utc = self.last_run.astimezone(timezone.utc) if self.last_run else None
         with open(STATE_PATH, 'wb') as f:
-            pickle.dump({'last_run': self.last_run}, f)
-        logger.info(f"Saved state: last_run = {self.last_run}")
+            pickle.dump({'last_run': last_run_utc}, f)
+        logger.info(f"Saved state: last_run = {self.last_run} (UTC: {last_run_utc})")
     
     def load(self):
         """Load state from file"""
@@ -117,6 +119,9 @@ class State:
             with open(STATE_PATH, 'rb') as f:
                 data = pickle.load(f)
                 self.last_run = data.get('last_run')
+                # If we have a timestamp but it's naive (no timezone), assume it's UTC
+                if self.last_run and not self.last_run.tzinfo:
+                    self.last_run = self.last_run.replace(tzinfo=timezone.utc)
                 logger.info(f"Loaded state: last_run = {self.last_run}")
         except (FileNotFoundError, EOFError, pickle.PickleError) as e:
             logger.warning(f"Could not load state: {e}")
@@ -124,12 +129,14 @@ class State:
 
 def adjust_time_window(state: State) -> None:
     """Adjust the time window based on the last successful run"""
-    now = datetime.now()
+    now = datetime.now().astimezone()  # Get current time with timezone
     
     if state.last_run:
         # Calculate hours since last successful run
+        # state.last_run is already in UTC from the State class
         hours_since_last_run = (now - state.last_run).total_seconds() / 3600
-        filter_criteria["time_period_hours"] = hours_since_last_run
+        # Enforce minimum time window of 1 hour
+        filter_criteria["time_period_hours"] = max(1.0, hours_since_last_run)
         logger.info(f"Setting time window to {filter_criteria['time_period_hours']:.2f} hours (since last run at {state.last_run})")
     else:
         # If no last run, default to 24 hours
@@ -516,13 +523,15 @@ async def filter_and_forward_messages(client, source_entities, target_entity):
         logger.error("No target channel specified")
         return
         
-    # Calculate the cutoff time
-    now = datetime.now()
-    cutoff_time = now - timedelta(hours=filter_criteria["time_period_hours"])
+    # Calculate the cutoff time in UTC
+    now = datetime.now().astimezone()  # Get current time with local timezone
+    now_utc = now.astimezone(timezone.utc)  # Convert to UTC
+    cutoff_time = now_utc - timedelta(hours=filter_criteria["time_period_hours"])
     
-    print(f"\nTime window:")
-    print(f"- Current time: {now}")
-    print(f"- Cutoff time: {cutoff_time}")
+    print(f"\nTime window (all times in UTC):")
+    print(f"- Current time (UTC): {now_utc}")
+    print(f"- Cutoff time (UTC): {cutoff_time}")
+    print(f"- Local time for reference: {now}")
     
     # Count statistics
     total_messages = 0
@@ -543,24 +552,29 @@ async def filter_and_forward_messages(client, source_entities, target_entity):
             print(f"\nProcessing messages from {source_name}...")
             
             try:
-                async for message in client.iter_messages(source, reverse=False):
+                # Debug: Get all messages first to verify count
+                all_messages = []
+                async for message in client.iter_messages(source, limit=10):  # Get last 10 messages
+                    message_date = message.date  # This is already in UTC from Telegram
+                    all_messages.append((message, message_date))
+                
+                print(f"\nDEBUG: Found {len(all_messages)} recent messages")
+                print("DEBUG: Message dates (UTC):")
+                for _, date in all_messages:
+                    print(f"- UTC: {date} | Local: {date.astimezone(now.tzinfo)}")
+                
+                # Now process messages with time filter
+                async for message in client.iter_messages(
+                    source,
+                    reverse=True,  # Get newest messages first
+                    offset_date=cutoff_time  # Only get messages after cutoff
+                ):
                     total_messages += 1
                     
-                    # Track message time
+                    # Track message time (already in UTC from Telegram)
                     message_date = message.date
-                    if message_date.tzinfo:
-                        message_date = message_date.replace(tzinfo=None)
                     
-                    # Skip messages newer than now (shouldn't happen, but just in case)
-                    if message_date > now:
-                        continue
-                        
-                    # Skip messages older than cutoff time
-                    if message_date < cutoff_time:
-                        # Since messages are in reverse chronological order, 
-                        # if we hit an old message we can break this channel's processing
-                        break
-                    
+                    # Since we're using offset_date, we don't need to check for old messages
                     processed_messages += 1
                     
                     # Skip messages without text
@@ -583,7 +597,9 @@ async def filter_and_forward_messages(client, source_entities, target_entity):
                         price = property_data.get('price', 'N/A')
                         bedrooms = property_data.get('bedrooms', 'N/A')
                         location = property_data.get('location', 'N/A')
-                        print(f"Match found: {price}€, {bedrooms} bed in {location} (at {message_date})")
+                        local_time = message_date.astimezone(now.tzinfo)
+                        print(f"Match found: {price}€, {bedrooms} bed in {location}")
+                        print(f"Time: {local_time} (local) / {message_date} (UTC)")
                         
                         try:
                             # Forward the original message with all media
@@ -709,53 +725,8 @@ async def main():
     client = None
 
     try:
-        # Try to load existing session string
-        session_string = None
-        try:
-            if os.path.exists(SESSION_STRING_PATH):
-                with open(SESSION_STRING_PATH, 'r') as f:
-                    session_string = f.read().strip()
-                    logger.info("Loaded existing session string")
-        except Exception as e:
-            logger.warning(f"Could not load session string: {e}")
-            session_string = None
-
-        # Initialize Telegram client with existing session if available
-        client = TelegramClient(
-            StringSession(session_string) if session_string else StringSession(),
-            API_ID,
-            API_HASH
-        )
-        
-        logger.info("Connecting to Telegram...")
-        await client.connect()
-        
-        if not await client.is_user_authorized():
-            if not PHONE:
-                phone = input("Enter your phone number (international format): ")
-            else:
-                phone = PHONE
-            
-            logger.info("Sending authentication code...")
-            await client.send_code_request(phone)
-            code = input("Enter the verification code you received: ")
-            
-            try:
-                await client.sign_in(phone, code)
-            except SessionPasswordNeededError:
-                password = getpass.getpass("Enter your 2FA password: ")
-                await client.sign_in(password=password)
-            
-            # Save the session string for future use
-            session_str = client.session.save()
-            try:
-                with open(SESSION_STRING_PATH, 'w') as f:
-                    f.write(session_str)
-                logger.info("Saved session string for future authentication")
-            except Exception as e:
-                logger.error(f"Failed to save session string: {e}")
-        
-        logger.info("Successfully connected to Telegram!")
+        # Initialize Telegram client and connect
+        client = await init_telegram()
         
         try:
             # Adjust time window based on last run
@@ -817,8 +788,8 @@ async def main():
             # Always send statistics message
             await send_statistics(client, target_entity, stats, filter_criteria["time_period_hours"])
             
-            # Update state only if we successfully completed the run (even if no messages were processed)
-            state.last_run = datetime.now()
+            # Update state with current time (in local timezone, will be converted to UTC when saved)
+            state.last_run = datetime.now().astimezone()
             state.save()
             
             if stats.get('processed', 0) > 0:
