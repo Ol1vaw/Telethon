@@ -248,6 +248,16 @@ DISTRICTS = {
         r'колумбия',
         r'columbia',
         
+        # Колосси
+        r'колосси',
+        r'колоси',
+        r'kolossi',
+        
+        # Агиа Зони
+        r'агиа[\s-]?зони',
+        r'агия[\s-]?зони',
+        r'agia[\s-]?zoni',
+        
         # Центр
         r'центр',
         r'city[\s-]?cent[er]r?',
@@ -437,10 +447,14 @@ LOCATION_PATTERNS = [
     r'(?i)(?:^|\s|[^\w\s])(?:ЛИМАС+ОЛ|LIMASS?OL|ПАФОС|PAPHOS|ЛАРНАК[АИ]|LARNACA|НИКО[СЗ]И[ЯИ]|NICOSIA|ПРОТАРАС|PROTARAS|АЙ[ЯИ][\s-]?НАП[АЫ]|AY[IA][\s-]?NAPA)(?:$|\s|[^\w\s])',
     
     # District patterns with uppercase variations
-    r'(?i)(?:^|\s|[^\w\s])(?:КАТОЛИКИ|KATHOLIKI|АГИОС[\s-]?ИОАНИС|AGIOS[\s-]?IOANNIS|ПЕТРА[\s-]?И[\s-]?ПАВЛА|PETRA[\s-]?I[\s-]?PAVLA|МЕЗА[\s-]?ГЕТОНИЯ|MESA[\s-]?GETONIA)(?:$|\s|[^\w\s])',
+    r'(?i)(?:^|\s|[^\w\s])(?:КАТОЛИКИ|KATHOLIKI|АГИОС[\s-]?ИОАНИС|AGIOS[\s-]?IOANNIS|ПЕТРА[\s-]?И[\s-]?ПАВЛА|PETRA[\s-]?I[\s-]?PAVLA|МЕЗА[\s-]?ГЕТОНИЯ|MESA[\s-]?GETONIA|КОЛОССИ|KOLOSSI|АГИА[\s-]?ЗОНИ|AGIA[\s-]?ZONI)(?:$|\s|[^\w\s])',
     
     # Location with property type (uppercase)
     r'(?i)(?:КВАРТИРА|ДОМ|АПАРТАМЕНТЫ?|СТУДИЯ|ПЕНТХАУС|ВИЛЛА)\s+(?:В|B)\s+(?:ЛИМАС+ОЛ|LIMASS?OL|ПАФОС|PAPHOS|ЛАРНАК[АИ]|LARNACA|НИКО[СЗ]И[ЯИ]|NICOSIA)(?:Е|E)?',
+    
+    # Special district-specific patterns
+    r'(?i)(?:^|\s|[^\w\s])(?:КОЛОССИ|KOLOSSI)(?:\s*[-–—]\s*|\s*\()?(?:ЛИМАССОЛ|LIMASSOL|Limassol district)(?:\))?(?:$|\s|[^\w\s])',
+    r'(?i)(?:^|\s|[^\w\s])(?:АГИА[\s-]?ЗОНИ|AGIA[\s-]?ZONI)(?:\s*[-–—]\s*|\s*\()?(?:ЛИМАССОЛ|LIMASSOL|Limassol district)(?:\))?(?:$|\s|[^\w\s])',
     
     # Street names and landmarks
     r'(?i)(?:^|\s|[^\w\s])(?:ПЕТРА[\s-]?И[\s-]?ПАВЛА|PETRA[\s-]?I[\s-]?PAVLA|BRAIN[\s-]?ROCKET|БРЕЙН[\s-]?РОКЕТ)(?:$|\s|[^\w\s])',
@@ -504,18 +518,73 @@ PRICE_PATTERNS = [
     r'(?i)cost:?\s*€?\s*(\d+(?:[.,]\d+)?(?:\s*\d+)?)',  # Cost in English
     r'(?i)rent:?\s*€?\s*(\d+(?:[.,]\d+)?(?:\s*\d+)?)',  # Rent in English
     r'(?i)аренда:?\s*€?\s*(\d+(?:[.,]\d+)?(?:\s*\d+)?)',  # Rent in Russian
+    r'(?i)(?:^|\n|\s)(\d+)(?:\s*€|\s+евро)',  # Simple number followed by euro symbol or word, at start of line or after space
+    r'(?i)(?:^|\n)€(\d+)',  # Euro symbol followed by number at start of line
+    r'(?i)(\d+)\s*евро',  # Number followed by "евро" word
 ]
 
 # Bedroom patterns
 BEDROOM_PATTERNS = [
-    r'(?i)(\d+)[\s-]*(?:сп?|к(?:омнат)?|bedroom|bed|br)',  # Number followed by bedroom indicators
-    r'(?i)(?:студия|studio)',  # Studio apartment
-    r'(?i)(?:одн|one|1)[\s-]*(?:сп?|к(?:омнат)?|bedroom|bed|br)',  # One bedroom
-    r'(?i)(?:дву|two|2)[\s-]*(?:сп?|к(?:омнат)?|bedroom|bed|br)',  # Two bedrooms
-    r'(?i)(?:тр[еи]|three|3)[\s-]*(?:сп?|к(?:омнат)?|bedroom|bed|br)',  # Three bedrooms
-    r'(?i)(?:четыр|four|4)[\s-]*(?:сп?|к(?:омнат)?|bedroom|bed|br)',  # Four bedrooms
-    r'(?i)(?:пят|five|5)[\s-]*(?:сп?|к(?:омнат)?|bedroom|bed|br)',  # Five bedrooms
-    r'(?i)(?:шест|six|6)[\s-]*(?:сп?|к(?:омнат)?|bedroom|bed|br)',  # Six bedrooms
+    # Studio patterns (count as 1 bedroom)
+    r'(?i)студия\s+пентхаус',  # Studio penthouse
+    r'(?i)(?:студия|studio)\b',  # Studio apartment
+    
+    # X+Y patterns
+    r'(?i)(\d+)\s*\+\s*(\d+)\s*(?:спальн|bedroom)',  # "4+1 спальни"
+    r'(?i)(\d+)\s*\+\s*(\d+)\s*(?:комнат|room)',  # "4+1 комнаты"
+    
+    # Russian patterns
+    r'(\d+)\s*(?:спальная|спальный|сп\.|спальни|спален)',  # Various forms of "bedroom"
+    r'(\d+)\s*(?:спальн(?:ая|ый)|сп\.?\s*)?(?:квартира|дом|апартамент)',  # Apartment/house with bedrooms
+    r'(?:квартира|дом|апартамент)\s*(?:с\s+)?(\d+)\s*(?:спальнями|спальней|спальнями)',  # "apartment with X bedrooms"
+    r'(\d+)[\s\-]?комнатная',  # "1-комнатная квартира"
+    r'(\d+)сп\b',  # "2сп" without space
+    r'(?:спальни|спален|спальня)\s+(\d+)',  # "Спальни 2"
+    r'(?:двумя|тремя|четырьмя)\s+спальн',  # Words "with two/three/four bedrooms"
+    r'одной\s+спальн',  # "with one bedroom"
+    r'с\s+(\d+)\s+спальн',  # "with X bedrooms"
+    r'(\d+)\s+спальня\b',  # "1 спальня", "2 спальня"
+    r'(\d+)\s+спальнями\b',  # "3 спальнями"
+    r'спальни:\s*(\d+)',  # "Спальни: 1"
+    r'(\d+)\s+сп-\s*ая',  # "2 сп- ая"
+    r'(\d+)\s+спальные',  # "2 спальные"
+    r'(\d+)\**\s+спальня',  # "1** спальня"
+    r'(\d+)х\s*спальная',  # "3х спальная квартира"
+    r'(\d+)\s+спальни\b',  # "3 спальни"
+    r'(\d+)-Х\s+СПАЛЬНАЯ',  # "3-Х СПАЛЬНАЯ ВИЛЛА"
+    r'КОМНАТА\b',  # Single room listings
+    r'(\d+)-сп\.',  # "4-сп." format
+    r'(\d+)\s+cпальни\b',  # "2 cпальни" (lowercase 'c')
+    r'(\d+)х\s+сп\b',  # "3х сп" format
+    r'(\d+)-спал\.',  # 
+    r'(\d+)-спальный',  # "4-спальный" format
+    r'(\d+)\s+\**спальни',  # "3 **спальни" format
+    r'(\d+)\s+сп\s+кв',  # "1 сп кв" format
+    r'две\s+спальни',  # "две спальни" in Russian text
+    r'(\d+)-спальн(?:ая|ый|ого)',  # "2-спальная", "3-спального дома"
+    r'однокомнатную',  # "однокомнатную квартиру"
+    r'вторая\s+спальня',  # "вторая спальня"
+    r'третья\s+спальня',  # "третья спальня"
+    r'четвертая\s+спальня',  # "четвертая спальня"
+    r'пятая\s+спальня',  # "пятая спальня"
+    r'зх\s*спальная',  # "зх спальная" (typo of "3х спальная")
+    r'(?:одну?шк[ау]|однушк[ау])',  # "однушка", "однушку"
+    r'просторн(?:ая|ую)\s+студию',  # "просторная студия", "просторную студию"
+    r'(\d+)[\s\-]?(?:х|х\s+)?(?:ком|комн|комнаты?|комнатн)',  # Various forms of "комната"
+
+    # English patterns
+    r'(\d+)\s*(?:bedroom|bed|br|b/r|b\.r\.|bdr)',  # Various abbreviations
+    r'(\d+)\s*(?:-|\s+)?bed(?:room)?s?\b',  # Variations like "3-bed", "3 beds"
+    r'one\s+bed(?:room)?\b',  # "one bedroom"
+    r'two\s+bed(?:room)?\b',  # "two bedrooms"
+    r'three\s+bed(?:room)?\b',  # "three bedrooms"
+    r'four\s+bed(?:room)?\b',  # "four bedrooms"
+    r'five\s+bed(?:room)?\b',  # "five bedrooms"
+    r'six\s+bed(?:room)?\b',  # "six bedrooms"
+    r'(\d+).*bedrooms?\s+apartment',  # "two bedrooms apartment" with words in between
+    r'(\d+)\s*bedrooms?\s+(?:apartment|flat|house)',  # "two bedrooms apartment"
+    r'(?:amazing|spacious|luxury|new)\s+(\d+)\s*(?:bed|bedroom)',
+    r'(?:one|two|three|four|five|six)[\s\-](?:bed|bedroom)',  # "one-bed", "two bed"
 ]
 
 # Type patterns

@@ -44,11 +44,19 @@ wheels/
 .installed.cfg
 *.egg
 
-# Logs
-*.log
-
-# Environment variables
+# Environment
 .env
+.venv
+env/
+venv/
+ENV/
+
+# Logs and runtime files
+logs/
+*.log
+pattern_debug_report.txt
+rental_filter_session.txt
+rental_filter_state.pkl
 
 # Telegram session files
 *.session
@@ -59,6 +67,9 @@ wheels/
 .AppleDouble
 .LSOverride
 ._*
+
+# System files
+com.user.rental_filter.plist
 
 # IDE
 .idea/

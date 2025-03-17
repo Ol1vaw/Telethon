@@ -1,0 +1,8 @@
+{
+    "min_price": 1500,
+    "max_price": 3000,
+    "city": "Limassol",
+    "min_beds": 3,
+    "max_beds": 10,
+    "prop_type": "apartments"
+}
