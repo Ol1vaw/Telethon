@@ -540,6 +540,7 @@ async def filter_and_forward_messages(client, source_entities, target_entity):
     parseable_messages = 0
     matching_messages = 0
     forwarded_messages = 0
+    total_media_forwarded = 0  # Track total media items forwarded
     
     print(f"\nAnalyzing and forwarding messages from the last {filter_criteria['time_period_hours']} hours...")
     print(f"Criteria: {filter_criteria['min_price']}€-{filter_criteria['max_price']}€, "
@@ -601,17 +602,125 @@ async def filter_and_forward_messages(client, source_entities, target_entity):
                         print(f"Match found: {price}€, {bedrooms} bed in {location}")
                         print(f"Time: {local_time} (local) / {message_date} (UTC)")
                         
+                        # Log media information
+                        media_count = 0
+                        if message.media:
+                            if hasattr(message.media, 'photo'):
+                                media_count += 1
+                                print(f"  📷 Has photo attachment")
+                            if hasattr(message.media, 'document'):
+                                media_count += 1
+                                print(f"  📎 Has document/media attachment")
+                            if hasattr(message, 'grouped_id') and message.grouped_id:
+                                print(f"  🖼️ Part of a media group (multiple photos)")
+                        
                         try:
-                            # Forward the original message with all media
-                            await client.forward_messages(target_entity, message)
-                            print(f"  ✓ Forwarded message to {utils.get_display_name(target_entity)}")
+                            # Instead of forwarding, create a new message with the original content and a link
+                            # Create message link
+                            chat_id = message.chat_id
+                            message_id = message.id
+                            
+                            # For supergroups/channels, we need to remove the -100 prefix for the link
+                            if str(chat_id).startswith('-100'):
+                                chat_id_for_link = str(chat_id)[4:]
+                            else:
+                                chat_id_for_link = str(chat_id)
+                                
+                            original_message_link = f"https://t.me/c/{chat_id_for_link}/{message_id}"
+                            
+                            # Create message text with original content and link
+                            forwarded_text = f"{message.text}\n\n" \
+                                             f"[Original message]({original_message_link})"
+                            
+                            # Send new message with original content + link
+                            if message.media:
+                                # If message has media, first send the media, then send text separately
+                                media_count = 0
+                                
+                                # Check for grouped media (album)
+                                if hasattr(message, 'grouped_id') and message.grouped_id:
+                                    # For media groups, we need to get all messages in the group and send them
+                                    print(f"  🖼️ Processing media group")
+                                    
+                                    # Get messages from the same group
+                                    group_id = message.grouped_id
+                                    media_group = []
+                                    
+                                    # Get messages in the same group - need to search both before and after
+                                    # to ensure we get all messages in the group
+                                    async for grouped_msg in client.iter_messages(
+                                        source, 
+                                        limit=20,  # Limit to avoid too many requests
+                                    ):
+                                        # Check if this message is part of the same group
+                                        if (hasattr(grouped_msg, 'grouped_id') and 
+                                            grouped_msg.grouped_id == group_id and
+                                            grouped_msg.media):  # Ensure it has media
+                                            media_group.append(grouped_msg)
+                                            
+                                    print(f"  📷 Found {len(media_group)} photos in media group")
+                                    media_count = len(media_group)
+                                    
+                                    # Send all media in group
+                                    if media_group:
+                                        # Send first media with caption
+                                        first_msg = media_group[0]
+                                        try:
+                                            await client.send_file(
+                                                target_entity, 
+                                                first_msg.media, 
+                                                caption=forwarded_text, 
+                                                parse_mode='md'
+                                            )
+                                            print(f"  📷 Sent first photo with caption")
+                                        except Exception as e:
+                                            logger.error(f"Error sending first media: {e}")
+                                            # Fall back to text message
+                                            await client.send_message(target_entity, forwarded_text, parse_mode='md')
+                                        
+                                        # Send rest of media without caption
+                                        for group_msg in media_group[1:]:
+                                            try:
+                                                await client.send_file(target_entity, group_msg.media)
+                                                print(f"  📷 Sent additional media from group")
+                                            except Exception as e:
+                                                logger.error(f"Error sending additional media: {e}")
+                                            await asyncio.sleep(0.2)  # Small delay between media sends
+                                # Single photo or document             
+                                elif hasattr(message.media, 'photo') or hasattr(message.media, 'document'):
+                                    try:
+                                        # Send as single media with caption
+                                        media_count = 1
+                                        print(f"  📷 Sending media attachment")
+                                        await client.send_file(
+                                            target_entity, 
+                                            message.media, 
+                                            caption=forwarded_text, 
+                                            parse_mode='md'
+                                        )
+                                    except Exception as e:
+                                        logger.error(f"Error sending media: {e}")
+                                        # Fall back to text message
+                                        await client.send_message(target_entity, forwarded_text, parse_mode='md')
+                                else:
+                                    # If we couldn't identify media type, just send the message as text
+                                    print(f"  ⚠️ Unknown media type, sending as text")
+                                    await client.send_message(target_entity, forwarded_text, parse_mode='md')
+                            else:
+                                # Text-only message
+                                await client.send_message(target_entity, forwarded_text, parse_mode='md')
+                            
+                            print(f"  ✓ Sent message to {utils.get_display_name(target_entity)}")
+                            if media_count > 0:
+                                print(f"  ✓ Sent with {media_count} media attachments")
+                                total_media_forwarded += media_count
                             
                             forwarded_messages += 1
-                            await asyncio.sleep(0.5)  # Small delay between forwards
+                            await asyncio.sleep(0.5)  # Small delay between sends
                             
                         except Exception as e:
-                            logger.error(f"Error forwarding message: {e}")
-                            print(f"  ✗ Failed to forward message")
+                            logger.error(f"Error sending message: {e}")
+                            print(f"  ✗ Failed to send message: {str(e)}")
                     
                     # Print progress every 100 messages
                     if total_messages % 100 == 0:
@@ -631,6 +740,7 @@ async def filter_and_forward_messages(client, source_entities, target_entity):
         print(f"- Messages with parseable property data: {parseable_messages}")
         print(f"- Messages matching all criteria: {matching_messages}")
         print(f"- Messages successfully forwarded: {forwarded_messages}")
+        print(f"- Total media items forwarded: {total_media_forwarded}")
         
         return {
             'total': total_messages,
@@ -638,7 +748,8 @@ async def filter_and_forward_messages(client, source_entities, target_entity):
             'with_text': messages_with_text,
             'parseable': parseable_messages,
             'matching': matching_messages,
-            'forwarded': forwarded_messages
+            'forwarded': forwarded_messages,
+            'media_forwarded': total_media_forwarded
         }
     except Exception as e:
         logger.error(f"Error in filter_and_forward_messages: {e}")
@@ -706,7 +817,8 @@ async def send_statistics(client, target_entity, stats: Dict[str, int], time_win
         f"📝 With text content: {stats['with_text']}\n"
         f"🏠 Property listings found: {stats['parseable']}\n"
         f"✅ Matching criteria: {stats['matching']}\n"
-        f"📨 Successfully forwarded: {stats['forwarded']}\n\n"
+        f"📨 Successfully forwarded: {stats['forwarded']}\n"
+        f"🖼️ Media items forwarded: {stats['media_forwarded']}\n\n"
         f"Next scan will start from: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
     )
     
@@ -750,7 +862,8 @@ async def main():
                 'with_text': 0,
                 'parseable': 0,
                 'matching': 0,
-                'forwarded': 0
+                'forwarded': 0,
+                'media_forwarded': 0
             }
             
             try:
