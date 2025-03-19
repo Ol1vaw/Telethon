@@ -663,29 +663,31 @@ async def filter_and_forward_messages(client, source_entities, target_entity):
                                     
                                     # Send all media in group
                                     if media_group:
-                                        # Send first media with caption
-                                        first_msg = media_group[0]
                                         try:
-                                            await client.send_file(
-                                                target_entity, 
-                                                first_msg.media, 
-                                                caption=forwarded_text, 
-                                                parse_mode='md'
-                                            )
-                                            print(f"  📷 Sent first photo with caption")
+                                            # Prepare media list for the album
+                                            media_list = []
+                                            for msg in media_group:
+                                                if msg.media:
+                                                    media_list.append(msg.media)
+                                            
+                                            # Send as a single album with caption on first photo
+                                            if media_list:
+                                                await client.send_file(
+                                                    target_entity,
+                                                    media_list,
+                                                    caption=forwarded_text,
+                                                    parse_mode='md',
+                                                    album=True
+                                                )
+                                                print(f"  📷 Sent {len(media_list)} photos as album")
+                                            else:
+                                                # Fallback if no media could be prepared
+                                                await client.send_message(target_entity, forwarded_text, parse_mode='md')
+                                                
                                         except Exception as e:
-                                            logger.error(f"Error sending first media: {e}")
+                                            logger.error(f"Error sending media album: {e}")
                                             # Fall back to text message
                                             await client.send_message(target_entity, forwarded_text, parse_mode='md')
-                                        
-                                        # Send rest of media without caption
-                                        for group_msg in media_group[1:]:
-                                            try:
-                                                await client.send_file(target_entity, group_msg.media)
-                                                print(f"  📷 Sent additional media from group")
-                                            except Exception as e:
-                                                logger.error(f"Error sending additional media: {e}")
-                                            await asyncio.sleep(0.2)  # Small delay between media sends
                                 # Single photo or document             
                                 elif hasattr(message.media, 'photo') or hasattr(message.media, 'document'):
                                     try:
